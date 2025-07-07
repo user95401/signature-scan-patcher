@@ -8,6 +8,13 @@
 #include <type_traits>
 #include <patterns.hpp>
 
+// Define pointer size for x86 vs x64
+#if defined(_M_X64) || defined(__amd64__)
+#  define PTR_SIZE 8
+#else
+#  define PTR_SIZE 4
+#endif
+
 namespace patterns
 {
     token_t parse_token(std::string pattern, uint32_t& current_index)
@@ -50,7 +57,6 @@ namespace patterns
             current_index++;
             return true;
         }
-
         return false;
     }
 
@@ -74,13 +80,11 @@ namespace patterns
                     token_t token = parse_token(pattern, current_index);
                     sub_tokens.push_back(token);
                 }
-
-                int32_t len = sub_tokens.size();
-                for (uint32_t i = 0; i < sub_tokens.size(); i++)
+                int32_t len = (int32_t)sub_tokens.size();
+                for (int32_t i = 0; i < (int32_t)sub_tokens.size(); i++)
                 {
                     sub_tokens[i].jump_if_fail = len - i - 1;
                 }
-
                 tokens.insert(tokens.end(), sub_tokens.begin(), sub_tokens.end());
                 continue;
             }
@@ -112,7 +116,6 @@ namespace patterns
         if (is_negative)
             byte = -byte;
         current_index += 2;
-
         return byte;
     }
 
@@ -120,42 +123,41 @@ namespace patterns
     {
         uint32_t current_index = 0;
         std::vector<byte_t> bytes;
-
         uint32_t repeat_count = 1;
 
         while (current_index < mask.length())
         {
-            byte_t byte;
+            byte_t byte{};
             byte.any_byte = false;
             byte.is_relative = false;
             byte.is_address = false;
             byte.value = 0;
             byte.offset = 0;
 
-            if (mask[current_index] == ' ') // ignore spaces
+            if (mask[current_index] == ' ')
             {
                 current_index++;
             }
-            else if (mask[current_index] == '?') // wildcard byte
+            else if (mask[current_index] == '?')
             {
                 byte.any_byte = true;
                 current_index++;
             }
-            else if (mask[current_index] == '%') // add/sub byte
+            else if (mask[current_index] == '%')
             {
                 byte.is_relative = true;
                 eat_token('(', mask, ++current_index);
                 byte.value = read_signed_byte(mask, current_index);
                 eat_token(')', mask, current_index);
             }
-            else if (mask[current_index] == '$') // address byte
+            else if (mask[current_index] == '$')
             {
                 byte.is_address = true;
                 eat_token('(', mask, ++current_index);
                 byte.offset = read_signed_byte(mask, current_index);
                 eat_token(')', mask, current_index);
             }
-            else if (mask[current_index] == '&') // address + add/sub byte
+            else if (mask[current_index] == '&')
             {
                 byte.is_address = true;
                 byte.is_relative = true;
@@ -164,7 +166,7 @@ namespace patterns
                 byte.value = read_signed_byte(mask, current_index);
                 eat_token(')', mask, current_index);
             }
-            else if (mask[current_index] == '*') // repeat next byte n times
+            else if (mask[current_index] == '*')
             {
                 eat_token('(', mask, ++current_index);
                 repeat_count = std::stoi(mask.substr(current_index, 2), nullptr, 16);
@@ -172,23 +174,18 @@ namespace patterns
                 eat_token(')', mask, current_index);
                 continue;
             }
-            else if (mask[current_index] == '@') // calculate offset by pattern
+            else if (mask[current_index] == '@')
             {
                 byte.is_pattern = true;
-                // read how many bytes should be stored
                 uint8_t bytes_to_store = std::stoi(mask.substr(++current_index, 1), nullptr, 10);
                 eat_token('(', mask, ++current_index);
-
-                // read the pattern
-                std::string pattern;
+                std::string pat;
                 while (!eat_token(')', mask, current_index))
                 {
-                    pattern += mask[current_index];
-                    current_index++;
+                    pat += mask[current_index++];
                 }
-
                 byte.value = bytes_to_store;
-                byte.pattern = pattern;
+                byte.pattern = pat;
             }
             else
             {
@@ -198,7 +195,6 @@ namespace patterns
 
             for (uint32_t i = 0; i < repeat_count; i++)
                 bytes.push_back(byte);
-
             repeat_count = 1;
         }
 
@@ -208,98 +204,69 @@ namespace patterns
     std::vector<uintptr_t> find_pattern(std::vector<token_t> pattern, std::string library)
     {
         // get module handle
-        HMODULE module;
-        if (library == "")
-            module = GetModuleHandle(0);
-        else
-            module = GetModuleHandle(library.c_str());
-
-        if (module == nullptr)
-            return {};
+        HMODULE module = library.empty() ? GetModuleHandle(nullptr) : GetModuleHandle(library.c_str());
+        if (!module) return {};
 
         bool search_all = false;
-
-        // check if first token is a wildcard
-        if (pattern[0].multi_pattern)
+        if (!pattern.empty() && pattern[0].multi_pattern)
         {
             search_all = true;
             pattern.erase(pattern.begin());
         }
 
-        // get module info
         MODULEINFO module_info;
-        if (!GetModuleInformation(GetCurrentProcess(), module, &module_info, sizeof(MODULEINFO)))
+        if (!GetModuleInformation(GetCurrentProcess(), module, &module_info, sizeof(module_info)))
             return {};
 
         std::vector<uintptr_t> addresses;
 
-        // iterate over module memory
-        for (uint32_t i = 0; i < module_info.SizeOfImage; i++)
+        // iterate over module memory with 64-bit index
+        for (SIZE_T i = 0; i < module_info.SizeOfImage; ++i)
         {
             bool found = true;
-            void* address = (void*)((uintptr_t)module + i);
-            void* addr = address;
+            void* base = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(module) + i);
             bool set_address_cursor = false;
-            uint32_t subtracted_bytes = 0;
-            uint32_t max_jump_length = -1;
+            SIZE_T subtracted_bytes = 0;
+            SIZE_T max_jump_length = SIZE_MAX;
 
-            // iterate over pattern tokens
-            for (uint32_t j = 0; j < pattern.size(); j++)
+            for (SIZE_T j = 0; j < pattern.size(); ++j)
             {
-                // check if we need to set the address cursor
                 if (pattern[j].set_address_cursor)
                 {
-                    // set address to current address
-                    addr = (void*)((uintptr_t)address + j);
+                    base = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(module) + i + j);
                     set_address_cursor = true;
                     continue;
                 }
-
-                // if cursor has been set, we need to offset j by 1
-                uintptr_t addr = (uintptr_t)address + (set_address_cursor ? j - 1 : j) - subtracted_bytes;
-
-                // check if we have enough memory left
-                if (addr >= (uintptr_t)module + module_info.SizeOfImage)
+                uintptr_t addr = reinterpret_cast<uintptr_t>(module) + i + (set_address_cursor ? j - 1 : j) - subtracted_bytes;
+                if (addr >= reinterpret_cast<uintptr_t>(module) + module_info.SizeOfImage)
                 {
                     found = false;
                     break;
                 }
-
-                if (pattern[j].jump_if_fail != -1 && max_jump_length == -1)
-                {
+                if (pattern[j].jump_if_fail != -1 && max_jump_length == SIZE_MAX)
                     max_jump_length = pattern[j].jump_if_fail;
-                }
                 else if (pattern[j].jump_if_fail == -1)
-                {
-                    max_jump_length = -1;
-                }
+                    max_jump_length = SIZE_MAX;
 
-                // check if we have a match
-                if (!pattern[j].any_byte && *(uint8_t*)(addr) != pattern[j].byte)
+                if (!pattern[j].any_byte && *reinterpret_cast<uint8_t*>(addr) != pattern[j].byte)
                 {
-                    // check if has "jump_if_fail" set
                     if (pattern[j].jump_if_fail != -1)
                     {
-                        // jump to the next token
                         j += pattern[j].jump_if_fail;
-
-                        // we also need to make sure we return to the original address before the [] brackets
                         subtracted_bytes += max_jump_length + 1;
                         continue;
                     }
-
                     found = false;
                     break;
                 }
             }
 
-            // return address offset for base address
             if (found)
             {
                 if (search_all)
-                    addresses.push_back((uintptr_t)addr);
+                    addresses.push_back(i);
                 else
-                    return { (uintptr_t)addr };
+                    return { i };
             }
         }
 
@@ -314,100 +281,70 @@ namespace patterns
 
     uintptr_t find_pattern(std::string pattern, std::string library)
     {
-        std::vector<uintptr_t> addresses = find_patterns(pattern, library);
-        if (addresses.size() == 0)
-            return 0;
-        return addresses[0];
+        auto results = find_patterns(pattern, library);
+        return results.empty() ? 0 : results[0];
     }
 
     result_t match(std::string pattern, std::string library, std::string mask)
     {
-        result_t result;
-        result.found = false;
-
-        // parse pattern and mask
-        std::vector<token_t> tokens = parse_pattern(pattern);
-        std::vector<byte_t> bytes = parse_mask(mask);
-
-        // find pattern
+        result_t result; result.found = false;
+        auto tokens = parse_pattern(pattern);
+        auto bytes = parse_mask(mask);
         auto addresses = find_pattern(tokens, library);
-        if (addresses.size() == 0)
-            return result;
-
-        // set result
+        if (addresses.empty()) return result;
         result.found = true;
 
-        for (auto& address : addresses)
+        uintptr_t module_addr = reinterpret_cast<uintptr_t>(GetModuleHandle(library.empty() ? nullptr : library.c_str()));
+        for (auto address : addresses)
         {
-            // address is the base address, so we need to offset it
-            uintptr_t module_addr;
-            if (library == "")
-                module_addr = (uintptr_t)GetModuleHandle(0);
-            else
-                module_addr = (uintptr_t)GetModuleHandle(library.c_str());
-
             opcode_t opcode;
-            opcode.address = (void*)((uintptr_t)address - module_addr);
-            uintptr_t global_offset = 0;
+            opcode.address = reinterpret_cast<void*>(address);
+            SIZE_T global_offset = 0;
 
-            // read bytes
-            for (uint32_t i = 0; i < bytes.size(); i++)
+            for (SIZE_T i = 0; i < bytes.size(); ++i)
             {
-                uintptr_t curr_address = (uintptr_t)address + i + global_offset;
-                uint8_t byte = *(uint8_t*)curr_address;
-                opcode.off_bytes.push_back(byte);
+                uintptr_t curr = address + i + global_offset;
+                uint8_t b = *reinterpret_cast<uint8_t*>(curr);
+                opcode.off_bytes.push_back(b);
 
                 if (bytes[i].any_byte)
                 {
-                    // add wildcard byte
-                    opcode.on_bytes.push_back(byte);
+                    opcode.on_bytes.push_back(b);
                 }
                 else if (bytes[i].is_relative && bytes[i].is_address)
                 {
-                    // take byte from relative address and add value
-                    uint8_t value = *(uint8_t*)(curr_address + bytes[i].offset);
-                    opcode.on_bytes.push_back(value + bytes[i].value);
+                    uintptr_t raw = *reinterpret_cast<uintptr_t*>(curr + bytes[i].offset);
+                    opcode.on_bytes.push_back(static_cast<uint8_t>(raw + bytes[i].value));
                 }
                 else if (bytes[i].is_relative)
                 {
-                    // add value to current byte
-                    opcode.on_bytes.push_back(byte + bytes[i].value);
+                    opcode.on_bytes.push_back(b + bytes[i].value);
                 }
                 else if (bytes[i].is_address)
                 {
-                    // take byte from relative address
-                    uint8_t value = *(uint8_t*)(curr_address + bytes[i].offset);
-                    opcode.on_bytes.push_back(value);
+                    uintptr_t raw = *reinterpret_cast<uintptr_t*>(curr + bytes[i].offset);
+                    for (int k = 0; k < PTR_SIZE; ++k)
+                        opcode.on_bytes.push_back(static_cast<uint8_t>((raw >> (k * 8)) & 0xFF));
                 }
                 else if (bytes[i].is_pattern)
                 {
-                    // find pattern and calculate offset
                     uintptr_t addr = find_pattern(bytes[i].pattern, library);
-
-                    uintptr_t offset = (uintptr_t)addr - (uintptr_t)curr_address;
+                    uintptr_t offset = addr - (curr);
                     offset -= bytes[i].value;
-
-                    // format offset to bytes
-                    for (uint32_t j = 0; j < bytes[i].value; j++)
+                    for (uint32_t j = 0; j < bytes[i].value; ++j)
                     {
-                        curr_address = (uintptr_t)address + i + global_offset + j;
-                        uint8_t byte = *(uint8_t*)curr_address;
-
-                        if (j > 0) // first byte was added already
-                            opcode.off_bytes.push_back(byte);
-
-                        opcode.on_bytes.push_back((offset >> (j * 8)) & 0xFF);
+                        uintptr_t loc = address + i + global_offset + j;
+                        uint8_t bb = *reinterpret_cast<uint8_t*>(loc);
+                        if (j > 0) opcode.off_bytes.push_back(bb);
+                        opcode.on_bytes.push_back(static_cast<uint8_t>((offset >> (j * 8)) & 0xFF));
                     }
-
                     global_offset += bytes[i].value;
                 }
                 else
                 {
-                    // set byte to a specific value
                     opcode.on_bytes.push_back(bytes[i].value);
                 }
             }
-
             result.opcodes.push_back(opcode);
         }
 

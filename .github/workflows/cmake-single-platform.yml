@@ -1,4 +1,4 @@
-name: CMake Debug x86 & x64
+name: Compile x86 and x64 debug
 
 on:
   push:
@@ -15,22 +15,43 @@ jobs:
     strategy:
       matrix:
         arch: [ "Win32", "x64" ]
+        suffix: [ "x86dbg", "x64dbg" ]
+        include:
+          - arch: Win32
+            suffix: x86dbg
+          - arch: x64
+            suffix: x64dbg
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Configure CMake (${{ matrix.arch }})
+    - name: Configure
       run: cmake -B build_${{ matrix.arch }} -A ${{ matrix.arch }} -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
 
-    - name: Build (${{ matrix.arch }})
+    - name: Build
       run: cmake --build build_${{ matrix.arch }} --config ${{ env.BUILD_TYPE }}
 
-    - name: Test (${{ matrix.arch }})
+    - name: Test
       working-directory: build_${{ matrix.arch }}
       run: ctest -C ${{ env.BUILD_TYPE }} --output-on-failure
 
-    - name: Upload Artifacts (${{ matrix.arch }})
+    - name: Rename
+      shell: pwsh
+      run: |
+        $buildDir = "build_${{ matrix.arch }}\\${{ env.BUILD_TYPE }}"
+        $outDir = "renamed_${{ matrix.arch }}"
+        mkdir $outDir | Out-Null
+        Get-ChildItem $buildDir -Filter *.exe -Recurse | ForEach-Object {
+            $newName = "$outDir\$($_.BaseName).${{ matrix.suffix }}.exe"
+            Copy-Item $_.FullName $newName
+        }
+        Get-ChildItem $buildDir -Filter *.dll -Recurse | ForEach-Object {
+            $newName = "$outDir\$($_.BaseName).${{ matrix.suffix }}.dll"
+            Copy-Item $_.FullName $newName
+        }
+
+    - name: Upload binaries
       uses: actions/upload-artifact@v4
       with:
-        name: build-${{ matrix.arch }}-${{ env.BUILD_TYPE }}
-        path: build_${{ matrix.arch }}/
+        name: binaries-${{ matrix.suffix }}
+        path: renamed_${{ matrix.arch }}

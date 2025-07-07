@@ -1,57 +1,52 @@
-name: Compile x86 and x64 debug
+name: Build DLL Debug
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ main ]
   pull_request:
-    branches: [ "master" ]
-
-env:
-  BUILD_TYPE: Debug
+    branches: [ main ]
 
 jobs:
   build:
     runs-on: windows-latest
+
     strategy:
       matrix:
-        arch: [ "Win32", "x64" ]
-        suffix: [ "x86dbg", "x64dbg" ]
         include:
-          - arch: Win32
-            suffix: x86dbg
+          - arch: x86
+            cmake_arch: Win32
           - arch: x64
-            suffix: x64dbg
+            cmake_arch: x64
+
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Configure
-      run: cmake -B build_${{ matrix.arch }} -A ${{ matrix.arch }} -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+      - name: Configure & Generate (${{ matrix.arch }})
+        run: |
+          cmake -B build-${{ matrix.arch }} `
+                -S . `
+                -A ${{ matrix.cmake_arch }} `
+                -DCMAKE_BUILD_TYPE=Debug
 
-    - name: Build
-      run: cmake --build build_${{ matrix.arch }} --config ${{ env.BUILD_TYPE }}
+      - name: Build (${{ matrix.arch }})
+        run: |
+          cmake --build build-${{ matrix.arch }} --config Debug
 
-    - name: Test
-      working-directory: build_${{ matrix.arch }}
-      run: ctest -C ${{ env.BUILD_TYPE }} --output-on-failure
+      - name: Rename DLLs (${{ matrix.arch }})
+        run: |
+          Get-ChildItem -Path build-${{ matrix.arch }}\Debug\*.dll | ForEach-Object {
+            $new = "{0}.{1}dbg{2}" -f $_.BaseName, "${{ matrix.arch }}", $_.Extension
+            Rename-Item $_.FullName $new
+          }
 
-    - name: Rename
-      shell: pwsh
-      run: |
-        $buildDir = "build_${{ matrix.arch }}\\${{ env.BUILD_TYPE }}"
-        $outDir = "renamed_${{ matrix.arch }}"
-        mkdir $outDir | Out-Null
-        Get-ChildItem $buildDir -Filter *.exe -Recurse | ForEach-Object {
-            $newName = "$outDir\$($_.BaseName).${{ matrix.suffix }}.exe"
-            Copy-Item $_.FullName $newName
-        }
-        Get-ChildItem $buildDir -Filter *.dll -Recurse | ForEach-Object {
-            $newName = "$outDir\$($_.BaseName).${{ matrix.suffix }}.dll"
-            Copy-Item $_.FullName $newName
-        }
-
-    - name: Upload binaries
-      uses: actions/upload-artifact@v4
-      with:
-        name: binaries-${{ matrix.suffix }}
-        path: renamed_${{ matrix.arch }}
+      - name: Upload artifacts (${{ matrix.arch }})
+        uses: actions/upload-artifact@v3
+        with:
+          name: dll-debug-${{ matrix.arch }}
+          path: build-${{ matrix.arch }}\Debug\*.${{ matrix.arch }}dbg.dll

@@ -49,4 +49,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dll-debug-${{ matrix.arch }}
-          path: build-${{ matrix.arch }}\Release\*.${{ matrix.arch }}dbg.dll
+          path: build-${{ matrix.arch }}\Release\*.*

@@ -1,0 +1,23 @@
+1 VERSIONINFO
+FILEVERSION 1, 0, 0, 0
+PRODUCTVERSION 1, 0, 0, 0
+FILEOS 0x40004
+FILETYPE 0x2
+{
+	BLOCK "StringFileInfo"
+	{
+		BLOCK "040904B0"
+		{
+			VALUE "ProductName", "https://github.com/user95401/epic-patterns-patcher"
+			VALUE "CompanyName", "user95401"
+			VALUE "LegalCopyright", "user95401's original"
+			VALUE "FileDescription", "patterns mem patcher via your text files"
+			VALUE "OriginalFilename", "user95401.epic-patterns-patcher.dll"
+		}
+	}
+
+	BLOCK "VarFileInfo"
+	{
+		VALUE "Translation", 0x0409 0x04B0
+	}
+}

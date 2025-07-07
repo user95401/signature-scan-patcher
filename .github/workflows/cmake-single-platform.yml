@@ -1,0 +1,36 @@
+name: CMake Debug x86 & x64
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+env:
+  BUILD_TYPE: Debug
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [ "Win32", "x64" ]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure CMake (${{ matrix.arch }})
+      run: cmake -B build_${{ matrix.arch }} -A ${{ matrix.arch }} -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+    - name: Build (${{ matrix.arch }})
+      run: cmake --build build_${{ matrix.arch }} --config ${{ env.BUILD_TYPE }}
+
+    - name: Test (${{ matrix.arch }})
+      working-directory: build_${{ matrix.arch }}
+      run: ctest -C ${{ env.BUILD_TYPE }} --output-on-failure
+
+    - name: Upload Artifacts (${{ matrix.arch }})
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-${{ matrix.arch }}-${{ env.BUILD_TYPE }}
+        path: build_${{ matrix.arch }}/

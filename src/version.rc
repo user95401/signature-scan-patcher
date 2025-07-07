@@ -8,11 +8,11 @@ FILETYPE 0x2
 	{
 		BLOCK "040904B0"
 		{
-			VALUE "ProductName", "https://github.com/user95401/epic-patterns-patcher"
+			VALUE "ProductName", "https://github.com/user95401/signature-scan-patcher"
 			VALUE "CompanyName", "user95401"
 			VALUE "LegalCopyright", "user95401's original"
-			VALUE "FileDescription", "patterns mem patcher via your text files"
-			VALUE "OriginalFilename", "user95401.epic-patterns-patcher.dll"
+			VALUE "FileDescription", "sigscanned memory patcher via your text files"
+			VALUE "OriginalFilename", "user95401.signature-scan-patcher.dll"
 		}
 	}
 

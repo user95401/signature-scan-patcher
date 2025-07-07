@@ -1,4 +1,4 @@
-name: Build DLL Debug
+name: Build DLL
 
 on:
   push:
@@ -32,16 +32,16 @@ jobs:
           cmake -B build-${{ matrix.arch }} `
                 -S . `
                 -A ${{ matrix.cmake_arch }} `
-                -DCMAKE_BUILD_TYPE=Debug
+                -D CMAKE_BUILD_TYPE=Release
 
       - name: Build (${{ matrix.arch }})
         run: |
-          cmake --build build-${{ matrix.arch }} --config Debug
+          cmake --build build-${{ matrix.arch }} --config Release
 
       - name: Rename DLLs (${{ matrix.arch }})
         run: |
-          Get-ChildItem -Path build-${{ matrix.arch }}\Debug\*.dll | ForEach-Object {
-            $new = "{0}.{1}dbg{2}" -f $_.BaseName, "${{ matrix.arch }}", $_.Extension
+          Get-ChildItem -Path build-${{ matrix.arch }}\Release\*.dll | ForEach-Object {
+            $new = "{0}.{1}{2}" -f $_.BaseName, "${{ matrix.arch }}", $_.Extension
             Rename-Item $_.FullName $new
           }
 
@@ -49,4 +49,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dll-debug-${{ matrix.arch }}
-          path: build-${{ matrix.arch }}\Debug\*.${{ matrix.arch }}dbg.dll
+          path: build-${{ matrix.arch }}\Release\*.${{ matrix.arch }}dbg.dll
